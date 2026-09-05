@@ -7,6 +7,7 @@ import {
 } from '@/lib/db'
 import { env } from '@/config/env'
 import { tryParseGithubOwner } from '@/lib/repoUrl'
+import { getInstallationAccessToken } from '@/lib/githubApp'
 import { requestBuild } from '@/clients/buildClient'
 import { requestDeploy } from '@/clients/orchestratorClient'
 import type { DeployTarget, DeploySource } from '@/clients/orchestratorClient'
@@ -100,8 +101,9 @@ export async function processDeployJob(job: Job<DeployJobData>): Promise<void> {
     let target: DeployTarget | undefined
     let source: DeploySource | undefined
     if (viaAgent && agentAccountId) {
+      const installationToken = installationId ? await getInstallationAccessToken(installationId) : null
       target = { mode: 'agent', accountId: agentAccountId }
-      source = { repoUrl: service.repoUrl, ref, dockerfilePath, installationId, installationToken: null }
+      source = { repoUrl: service.repoUrl, ref, dockerfilePath, installationId, installationToken }
     }
 
     const deployResult = await requestDeploy({

@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import type { Job } from 'bullmq'
 import { db } from '@/lib/db'
-import { eq, users, projects, environments, services, deployments, logStreams, providerConfigs, providerAgents } from 'mitto-lib-ts-orm'
+import { eq, users, projects, environments, services, deployments, logStreams, providerConfigs, providerAgents, githubInstallations } from 'mitto-lib-ts-orm'
 import { processDeployJob } from '@/jobs/deployJob'
 import type { DeployJobData } from '@/queues/deployQueue'
+
+const getInstallationAccessToken = vi.fn()
+vi.mock('@/lib/githubApp', () => ({
+  getInstallationAccessToken: (...args: unknown[]) => getInstallationAccessToken(...args),
+}))
 
 async function makeFixtures(overrides: { repoUrl?: string | null; ownerId?: string } = {}) {
   const [project] = await db.insert(projects).values({
@@ -58,6 +63,7 @@ describe('processDeployJob', () => {
 
   afterEach(async () => {
     vi.unstubAllGlobals()
+    getInstallationAccessToken.mockReset()
     for (const id of cleanupProjectIds.splice(0)) {
       await db.delete(projects).where(eq(projects.id, id))
     }
@@ -201,6 +207,7 @@ describe('processDeployJob', () => {
         expect(body.target).toEqual({ mode: 'agent', accountId: owner.id })
         expect(body.source.repoUrl).toBe('https://github.com/owner/repo')
         expect(body.source.dockerfilePath).toBe('Dockerfile')
+        expect(body.source.installationToken).toBeNull()
         return Promise.resolve({ json: () => Promise.resolve({ success: true, deployUrl: 'http://host.docker.internal:5000', containerId: 'agent-container', hostPort: 5000 }) })
       }
       throw new Error(`Unexpected fetch to ${url}`)
@@ -221,6 +228,41 @@ describe('processDeployJob', () => {
     const streams = await db.select().from(logStreams).where(eq(logStreams.deploymentId, deployment.id))
     expect(streams).toHaveLength(2)
     expect(streams.every((s) => s.provider === 'agent')).toBe(true)
+  })
+
+  it('mints a GitHub App installation token and passes it to the agent for a private repo', async () => {
+    const owner = await makeSelfHostedOwner({ withOnlineAgent: true })
+    await db.insert(githubInstallations).values({
+      userId: owner.id,
+      installationId: `inst-${Date.now()}`,
+      accountLogin: 'owner',
+      accountType: 'Organization',
+    })
+    const { project, environment, service, deployment } = await makeFixtures({ ownerId: owner.id })
+    cleanupProjectIds.push(project.id)
+
+    getInstallationAccessToken.mockResolvedValue('ghs_minted_token')
+
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/deploy')) {
+        const body = JSON.parse(String(init?.body))
+        expect(body.source.installationToken).toBe('ghs_minted_token')
+        return Promise.resolve({ json: () => Promise.resolve({ success: true, deployUrl: 'http://host.docker.internal:5000', containerId: 'agent-container', hostPort: 5000 }) })
+      }
+      throw new Error(`Unexpected fetch to ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await processDeployJob(makeJob({
+      deploymentId: deployment.id,
+      serviceId: service.id,
+      projectId: project.id,
+      environmentId: environment.id,
+    }))
+
+    expect(getInstallationAccessToken).toHaveBeenCalledOnce()
+    const [final] = await db.select().from(deployments).where(eq(deployments.id, deployment.id))
+    expect(final.status).toBe('live')
   })
 
   it('throws when the deployment does not exist', async () => {

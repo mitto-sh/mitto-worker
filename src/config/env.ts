@@ -9,6 +9,9 @@ const envSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
   ENCRYPTION_KEY: z.string().min(32),
 
+  GITHUB_APP_ID: z.string().optional(),
+  GITHUB_APP_PRIVATE_KEY_PATH: z.string().optional(),
+
   MITTO_BUILD_URL: z.string().default('http://localhost:3001'),
   MITTO_ORCHESTRATOR_URL: z.string().default('http://localhost:3003'),
 })
