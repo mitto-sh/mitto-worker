@@ -1,5 +1,17 @@
 import { env } from '@/config/env'
 
+export interface DeploySource {
+  repoUrl: string
+  ref: string
+  dockerfilePath: string
+  installationId: string | null
+  installationToken: string | null
+}
+
+export type DeployTarget =
+  | { mode: 'docker' }
+  | { mode: 'agent'; accountId: string }
+
 export interface DeployRequest {
   deploymentId: string
   serviceId: string
@@ -9,6 +21,8 @@ export interface DeployRequest {
   healthCheck: string
   envVars: Record<string, string>
   serviceType: 'web' | 'worker' | 'cron' | 'static'
+  target?: DeployTarget
+  source?: DeploySource
 }
 
 export type DeployResponse =
